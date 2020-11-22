@@ -45,7 +45,7 @@ class get_AMO:
         data = json.dumps( data)
         print(data)
         reqv = requests.post(url, headers = self.headers, data=data)
-        
+        print(reqv)
         return json.loads(reqv.text)
 
     def get(self, url):
@@ -207,3 +207,82 @@ class get_AMO:
         df_custom['wf_company_id'] = company_id
 
         return df_custom
+    
+    def post_notes(self, lead_id, text):
+        
+        data = [{
+                "note_type": "common",
+                "params": {
+                    "text": str(text)
+                }}]
+
+        url = f"{self.domain}api/v4/leads/{str(lead_id)}/notes"
+        data = json.dumps(data)
+        reqv = requests.post(url, headers = self.headers, data=data)
+        return reqv
+    
+    def creat_new_funnels2(self,company_id):
+        funnels =  [{'name': 'Воронка WorkFace',
+         'sort': 10,
+         'is_main': False,
+         'is_unsorted_on' : False,
+         '_embedded': {'statuses': [ 
+
+                        {
+                            "name": "ЛИД",
+                            "sort": 20,
+
+                        },
+                        {
+                            "name": "КОНТАКТ УСТАНОВЛЕН",
+                            "sort": 30,
+
+                        },
+                        {
+                            "name": "ПОТРЕБНОСТЬ ВЫЯВЛЕНА",
+                            "sort": 40,
+
+                        },
+                        {
+                            "name": "СЧЕТ-ДОГОВОР ВЫСТАВЛЕН/ОПЛАЧЕН",
+                            "sort": 50,
+
+                        },
+                        {
+                            "name": "ОТГРУЗКА/ДОСТАВКА",
+                            "sort": 60,
+                        },  
+                        {
+                            "id": 142,
+                            "name": "Завершена"
+                        },
+                        {
+                            "id": 143,
+                            "name": "Отменена"
+                        }
+
+                    ]}
+                    }
+                   ]
+        piplelines_create = self.post_data( 'leads/pipelines', funnels)
+        map_states={'ЛИД':[1,2],
+                    143:[4],
+                    'КОНТАКТ УСТАНОВЛЕН':[7,3,5],
+                    'ПОТРЕБНОСТЬ ВЫЯВЛЕНА':[8],
+                    'СЧЕТ-ДОГОВОР ВЫСТАВЛЕН/ОПЛАЧЕН':[9],
+                    'ОТГРУЗКА/ДОСТАВКА':[10],
+                    142:[11]}
+        created_funnel_json = piplelines_create['_embedded']['pipelines'][0]['_embedded']['statuses']
+        print(created_funnel_json)
+        key_states = {i['name']:i['id'] for i in created_funnel_json}
+        print(key_states)
+        creat_states_map = []
+        for state_name in map_states:
+            if state_name in key_states:
+                for state in map_states[state_name]:
+                    creat_states_map.append([state, key_states[state_name], company_id])    
+            else:
+                for state in map_states[state_name]:
+                    for s_id in map_states[state_name]:
+                        creat_states_map.append([state, state_name,company_id])
+        return creat_states_map

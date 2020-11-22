@@ -479,7 +479,7 @@ for client in integrated_client[:1]:
     wf_deal_dates_dict = {i.deal_id: i.dt_change for i in tracked_deals_status_bd.itertuples()}
 
     for deal_modif in g_base_deals.itertuples():
-        if not deal_modif.last_modified or deal_modif.last_modified < wf_deal_dates_dict[deal_modif.wf_id]:
+        if deal_modif.last_modified < wf_deal_dates_dict[deal_modif.wf_id]:
             u_amo_data, u_db_query = update_amo_lead(deal_modif, customs_fields, wf_db)
             amo_connect.patch('leads',[u_amo_data])
             u_db_query2 = u_db_query.replace("\\n", "").replace('\\', '').replace("=\\'", "=\\'").replace("=\'", "='")
@@ -513,7 +513,8 @@ for client in integrated_client[:1]:
             g_db.reopen()
             update_q = f""" UPDATE tracked_deals 
                     SET 
-                        wf_status = {cur_deals_states[i.wf_id]}
+                        wf_status = {cur_deals_states[i.wf_id]},
+                        last_modified={int(datetime.datetime.now().timestamp())}
                     WHERE wf_id = {i.wf_id}"""
             g_db.put(update_q)
             states_map

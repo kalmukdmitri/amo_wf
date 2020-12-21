@@ -1,5 +1,7 @@
+# gsql - модуль взаимодействия с базой для выгрузки и отправки новых данный
 from gsql import gsql
 from pandas import DataFrame as pd
+# amo_class - класс для упрощения взаимодействий с Амо
 from amo_class import get_AMO
 import pymysql.cursors
 import time
@@ -8,9 +10,39 @@ import json
 import string
 import datetime
 import re
+
+def generate_notes(items_data):
+#     Генерация текста заметки по типу изменения
+    items_data = json.loads(items_data)
+    mes = f'Изменилось содержимое заказа {deal_id}:\n\n'
+    
+    for states, change in items_data['changes'].items():
+        if states == 'last':
+            mes += 'Было:\n\n'
+        elif states == 'current':
+            mes += '\nСтало:\n\n'
+        for change_type, change_val in change.items():
+            if change_type == 'delivery':
+                mes += 'Тип доставки: '
+                mes += change_val['name']+'\n'
+            if change_type == 'goods':
+                good_chng = list(change_val.values())
+                for good_vals in good_chng:
+                    mes += f'\nТовар: {good_vals["name"]}\n'
+                    if 'quantity' in good_vals:
+                        mes += f'Количество: {good_vals["quantity"]}\n'
+                    if 'price' in good_vals:
+                        mes += f'Цена: {good_vals["price"]}\n'
+            if change_type == 'payment':
+                    mes += f'Тип оплаты: {change_val["name"]}\n'
+
+    return mes
+
+
 def get_custom_phone(cstms , fld = 78683):
+#     Выгрузка и форматирование строки телефон в стандарт для проверки но новизну клиента
+    
     for i in cstms:
-        
         if 'id' in i and i['id'] == fld:
             phn  = ''
             for j in i['values'][0]['value']:
@@ -21,6 +53,7 @@ def get_custom_phone(cstms , fld = 78683):
             return phn
 
 def create_amo_lead(deals_info, deals_products, json_tracker, funnel_dict, amo_account_id, customs_fields):
+#     Генерация словаря с содежимым сделки для отправки в амо
     customs_fields = customs_fields['leads']
     products = f"Дата заказа {str(datetime.datetime.utcfromtimestamp(deals_info.dt_create))} \n"
     for i in deals_products[deals_info.deal_id]:
@@ -69,6 +102,7 @@ def create_amo_lead(deals_info, deals_products, json_tracker, funnel_dict, amo_a
     return lead
 
 def create_amo_cmp(cmp_data,customs_fields):
+#     Генерация словаря с данными о компании для отправики в АМО
     customs_fields = customs_fields['companies']
     try:
         sub_companies = json.loads(cmp_data.sub_companies)
@@ -109,6 +143,7 @@ def create_amo_cmp(cmp_data,customs_fields):
     return cnts
 
 def create_amo_cnt(cnt,customs_fields):
+    #     Генерация словаря с данными о Контакте для отправики в АМО
     customs_fields = customs_fields['contacts']
     cnts = {
         'phone': cnt.phone,
@@ -120,16 +155,14 @@ def create_amo_cnt(cnt,customs_fields):
             'field_name': 'Телефон',
             'field_code': 'PHONE',
             'field_type': 'multitext',
-            'values': [{'value': str(cnt.phone),
-                        'enum_code': 'WORK'}]
+            'values': [{'value': str(cnt.phone)}]
             },
             {
             'field_id': customs_fields['Email'],
             'field_name': 'Email',
             'field_code': 'EMAIL',
             'field_type': 'multitext',
-            'values': [{'value': str(cnt.email), 
-                        'enum_code': 'WORK'}]
+            'values': [{'value': str(cnt.email)}]
             }
             ]
                 }
@@ -137,6 +170,7 @@ def create_amo_cnt(cnt,customs_fields):
     return cnts
 
 def get_new_token_dp(cmp_id, g_db):
+#     Модуль обновления токена в в АМО
     
     old_token = g_db.get(f'select * from tokens where wf_cmp_id = {cmp_id}')
     d_token = {i:e[0] for i,e in dict(old_token).items()}
@@ -167,6 +201,7 @@ def get_new_token_dp(cmp_id, g_db):
     return d_token
 
 def update_df_q(df_changes, table):
+#     Служебнка функция генерации строки запроса в БД по обновлению данных из dataframe
     queries = []
     base  = f"UPDATE {table} SET "
     for i in df_changes.itertuples():
@@ -177,12 +212,15 @@ def update_df_q(df_changes, table):
     return queries
 
 
+# Данные о доступе в базе храняться в json в корне проекта
+
 with open('db_access.json') as json_file:
     keys = json.load(json_file)
 
 gsql_token = keys['gsql_token']
 wf_pass = keys['wf_pass']
 
+# С
 g_db = gsql(gsql_token)
 
 get_current_cmp = f"select * from domain_data"
@@ -191,9 +229,7 @@ current_clients=g_db.get(get_current_cmp)
 integrated_client = []
 for i in current_clients.iterrows():
     integrated_client.append(dict(i[1]))
-
-# Модуль новый заказ
-
+    
 for client in integrated_client[:1]:
     g_db.reopen() 
     client_json = client.copy()
@@ -212,6 +248,16 @@ for client in integrated_client[:1]:
         fields_pd = amo_connect.create_custom_fields(supplier_company_id)
         qu_add_custom_fields = g_db.insert_pd(fields_pd, 'custom_fields')
         g_db.put(qu_add_custom_fields)
+        names = ['Интернет-Магазин', 'Workface']
+        data = []
+        for i in names:
+            data.append({'name':i})
+        tags_ids = amo_connect.post_data('leads/tags', data)
+        tags_pd = pd(tags_ids['_embedded']['tags'])
+        tags_pd = tags_pd.drop(columns = ['request_id'])
+        tags_pd['company_id'] = supplier_company_id
+        q_tags = g_db.insert_pd(tags_pd , 'tags') 
+        g_db.put(q_tags)
 
     amo_account_id = dicts_amo['id']
 
@@ -225,7 +271,7 @@ for client in integrated_client[:1]:
     and deal_id >{deal_id}"""
 
     deals_info = wf_db.get(get_last_order)
-    
+
     customs = g_db.get(f"select * from custom_fields where wf_company_id = {supplier_company_id} ")
     customs_fields = {}
     for i in customs.itertuples():
@@ -234,13 +280,13 @@ for client in integrated_client[:1]:
         else:
             customs_fields[i.entity_type] = {}
             customs_fields[i.entity_type][i.name] = i.id
-            
+# Если новые заявки есть - передём
     if len(deals_info) > 0:
-        
+
         deals_ids = (', ').join([str(i) for i in deals_info['deal_id']])
         get_order_products = f"""SELECT deal_id, caption, cnt, price FROM `deal_good_offers`
         where deal_id in ( {deals_ids} )"""
-
+        tags_data = g_db.get(f'select id from tags where company_id = {supplier_company_id}')
         deals_products = wf_db.get(get_order_products)
 
         deals_data = {}
@@ -256,13 +302,28 @@ for client in integrated_client[:1]:
             leads.append(create_amo_lead(order, deals_data,client_json, funnel_dict,amo_account_id, customs_fields))
 
         costomers_ids = (', ').join([str(i) for i in deals_info['consumer_profile_id']])
-        get_cnts = f"""SELECT * FROM `companies`
-        where company_id in ({costomers_ids})"""
+        get_cnts = f"""
+        SELECT 
+            company_id,
+            name,
+            contact_person,
+            contact_person_position,
+            number,
+            sub_companies,
+            about,
+            website,
+            address,
+            image,
+            status_text,
+            is_paid,
+            dt_last_update,
+            currency,
+            currency_balance,
+            users.phone,
+            users.email
 
-        cnts = wf_db.get(get_cnts)
-
-        costomers_ids = (', ').join([str(i) for i in deals_info['consumer_profile_id']])
-        get_cnts = f"""SELECT * FROM `companies`
+        FROM `companies` as c
+        left join users on c.user_id = users.user_id
         where company_id in ({costomers_ids})"""
 
         cnts = wf_db.get(get_cnts)
@@ -292,18 +353,16 @@ for client in integrated_client[:1]:
             for i, cnt_response in enumerate(cnt_ids['_embedded']['contacts']):
                 contacts[i]['amo_cnt_id'] = cnt_response['id']
 
-        ctn_ids = {i['cnt_id']:i['amo_cnt_id'] for i in  contacts}
+        ctn_ids = {i['cnt_id']:i['amo_cnt_id'] for i in contacts}
 
         for lead in leads:
             linked_entity = f"leads/{lead['lead_link']}/link"
             linking_data = [
-                {
-                    "to_entity_id": ctn_ids[lead['cnt_id']],
-                    "to_entity_type": "contacts",
-                    "metadata": {
-                        "is_main": True,
-                    }
-                }
+            {
+            "to_entity_id": ctn_ids[lead['cnt_id']],
+            "to_entity_type": "contacts",
+            "metadata": {"is_main": True,}
+            }
             ]
             linkage = amo_connect.post_data(linked_entity,linking_data)
 
@@ -322,8 +381,8 @@ for client in integrated_client[:1]:
 
         if len(cmp_data)>0:
             cnt_ids = amo_connect.post_data('companies',cmp_data)
-            for i, cnt_response in enumerate(cnt_ids['_embedded']['contacts']):
-                contacts[i]['amo_cnt_id'] = cnt_response['id']
+            for i, cnt_response in enumerate(cnt_ids['_embedded']['companies']):
+                companies[i]['amo_cnt_id'] = cnt_response['id']
 
         cmp_ids = {i['cnt_id']:i['amo_cmp_id'] for i in companies}
 
@@ -333,17 +392,30 @@ for client in integrated_client[:1]:
                 {
                     "to_entity_id": cmp_ids[lead['cnt_id']],
                     "to_entity_type": "companies",
-                }
-            ]
+                    }]
             linkage = amo_connect.post_data(linked_entity,linking_data)
-            
+
         for j in leads:
             text =  "Поступил новый заказ из workface.ru:\n " 
             text+={i['field_name']:i['values'][0]['value'] for i in j['data']['custom_fields_values']}['Спецификация']
             text += f'Сумма заказа {j["data"]["price"]}'
 
             amo_connect.post_notes(j['lead_link'],text)
-            
+
+        tags = [{'id':i} for i in tags_data['id']]
+
+        for t in leads:
+            data = [
+                    {
+                        "id": t['lead_link'],
+                        "_embedded": {
+                            "tags": 
+                                    tags
+                        }
+                    }
+                    ]
+            amo_connect.patch('leads',data )
+
         leads_states = [[i['lead_id'],i['lead_link'],i['data']['status_id'],supplier_company_id, i['wf_status'], int(datetime.datetime.now().timestamp()) ] for i in leads]
         pd_new_leads = pd(leads_states, columns = ['wf_id', 'amo_deal_id', 'amo_status', 'supplier_company_id' ,'wf_status' , 'last_modified'])
         q_new_leads = g_db.insert_pd(pd_new_leads , 'tracked_deals')
@@ -398,18 +470,16 @@ for client in integrated_client[:1]:
             for i in changes:
                 patch_lead_link = f"leads/{str(i)}"
 
-                change = {
-                'status_id' : changes[i]
-                }
+                change = {'status_id' : changes[i]}
                 amo_connect.patch(patch_lead_link,change)
 
         update_states(changes)
 
         for i in updates_list:
             g_db.put(i)
-            
+# Модуль проверки и уведовления о смене содержимого заказа
     def update_amo_lead(deal_modif, customs_fields, wf_db):
-    
+
         deal_id = deal_modif.wf_id
         wf_db.reopen()
         changed_deal_q = f"""
@@ -464,7 +534,7 @@ for client in integrated_client[:1]:
                      'price': int(deals_info.total_price)}
         lead = dict_json.copy()
         lead['id'] = int(deal_modif.amo_deal_id)
-        
+
 
         new_order_json = json.dumps(dict_json, ensure_ascii=False)
         update_q = f"""UPDATE tracked_deals 
@@ -473,26 +543,26 @@ for client in integrated_client[:1]:
             last_modified={int(datetime.datetime.now().timestamp())}
         WHERE wf_id = {deal_id}"""
         update_q = pymysql.escape_string(update_q)
-        return (lead, update_q)
+        return (lead, update_q, deals_info.dt_change)
 
-# Модуль проверки и уведовления о смене содержимого заказа
+
     wf_deal_dates_dict = {i.deal_id: i.dt_change for i in tracked_deals_status_bd.itertuples()}
-
+    
     for deal_modif in g_base_deals.itertuples():
-        if deal_modif.last_modified < wf_deal_dates_dict[deal_modif.wf_id]:
-            u_amo_data, u_db_query = update_amo_lead(deal_modif, customs_fields, wf_db)
+        if deal_modif.last_modified+200 < wf_deal_dates_dict[deal_modif.wf_id]:
+            u_amo_data, u_db_query, unix_dt = update_amo_lead(deal_modif, customs_fields, wf_db)
             amo_connect.patch('leads',[u_amo_data])
             u_db_query2 = u_db_query.replace("\\n", "").replace('\\', '').replace("=\\'", "=\\'").replace("=\'", "='")
-#             u_db_query = pymysql.escape_string(u_db_query)
             g_db.put(u_db_query2)
+            
             text =  "Изменения заказа на workface.ru:\n " 
             text+={i['field_name']:i['values'][0]['value'] for i in u_amo_data['custom_fields_values']}['Спецификация']
             text += f'Сумма заказа {u_amo_data["price"]}'   
             text = text.replace('\\n','\n')
             amo_connect.post_notes(u_amo_data['id'],text)
 
-# Модуль проверки и уведовления о смене статуса заказа
-            
+    #Модуль проверки и уведовления о смене статуса заказа
+
     states_map  = {
     1:'Подтверждена',
     2: 'Черновик',
@@ -504,19 +574,20 @@ for client in integrated_client[:1]:
     8: 'Подтверждена с корректировкой',
     9: 'На выполнении',
     10:'Отмечена выполненной',
-    11: 'Выполнена'
+    11: 'Выполнена',
+    12: 'На выполнении с корректировкой'   
     }
 
     cur_deals_states={i.deal_id:i.status for i in tracked_deals_status_bd.itertuples()}
     for i in g_base_deals.itertuples():
         if i.wf_status != cur_deals_states[i.wf_id]:
             g_db.reopen()
-            update_q = f""" UPDATE tracked_deals 
-                    SET 
+            update_q = f""" 
+                    UPDATE tracked_deals 
+                    SET
                         wf_status = {cur_deals_states[i.wf_id]},
                         last_modified={int(datetime.datetime.now().timestamp())}
                     WHERE wf_id = {i.wf_id}"""
             g_db.put(update_q)
-            states_map
             mes = f'Статус сделки изменился с "{states_map[i.wf_status]}" на "{states_map[cur_deals_states[i.wf_id]]}"'
             amo_connect.post_notes(i.amo_deal_id,mes)

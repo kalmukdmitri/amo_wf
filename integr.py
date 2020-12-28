@@ -230,7 +230,7 @@ integrated_client = []
 for i in current_clients.iterrows():
     integrated_client.append(dict(i[1]))
     
-for client in integrated_client[:1]:
+for client in integrated_client:
     g_db.reopen() 
     client_json = client.copy()
     supplier_company_id = client_json['supplier_company_id']
@@ -382,7 +382,7 @@ for client in integrated_client[:1]:
         if len(cmp_data)>0:
             cnt_ids = amo_connect.post_data('companies',cmp_data)
             for i, cnt_response in enumerate(cnt_ids['_embedded']['companies']):
-                companies[i]['amo_cnt_id'] = cnt_response['id']
+                companies[i]['amo_cmp_id'] = cnt_response['id']
 
         cmp_ids = {i['cnt_id']:i['amo_cmp_id'] for i in companies}
 

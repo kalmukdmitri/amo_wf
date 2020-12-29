@@ -230,7 +230,7 @@ integrated_client = []
 for i in current_clients.iterrows():
     integrated_client.append(dict(i[1]))
     
-for client in integrated_client:
+for client in integrated_client[:1]:
     g_db.reopen() 
     client_json = client.copy()
     supplier_company_id = client_json['supplier_company_id']
